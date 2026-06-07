@@ -9,13 +9,69 @@ type Message = {
   role: Role;
 };
 
+type ClaudeResponseTextContent = {
+  type: 'text';
+  text: string;
+};
+type ClaudeResponseToolContent = {
+  type: 'tool_use';
+  text: never;
+  id: string;
+  name: string;
+  input: Record<string, any>;
+};
+type ClaudeResponseContent =
+  | ClaudeResponseTextContent
+  | ClaudeResponseToolContent;
+
+type ClaudeStopReason =
+  | 'end_turn'
+  | 'max_tokens'
+  | 'stop_sequence'
+  | 'tool_use';
+type ClaudeTokenUsage = {
+  input_tokens: number;
+  output_tokens: number;
+};
+
+type ClaudeResponse = {
+  id: string;
+  type: 'message';
+  role: 'assistant';
+  model: string;
+  content: ClaudeResponseContent[];
+  stop_reason: ClaudeStopReason;
+  stop_sequence: string | null;
+  usage: ClaudeTokenUsage;
+};
+
+type UUID = string;
+type ClaudeServiceRequest = {
+  message: string;
+  sessionId: UUID;
+  stopSequences: string[];
+};
+type ClaudeServiceResponse = {
+  answer: string;
+  input: number;
+  output: number;
+  reason: ClaudeStopReason;
+  sequence: string | null;
+};
+
+const DEFAULT_MODEL = 'claude-sonnet-4-6';
+
 @Injectable()
 export class ClaudeService {
-  private readonly history = new Map<string, Message[]>();
+  private readonly history = new Map<UUID, Message[]>();
 
   constructor(private readonly config: ConfigService) {}
 
-  async fetchApi(sessionId: string, message: string): Promise<string> {
+  async fetchApi({
+    message,
+    sessionId,
+    stopSequences,
+  }: ClaudeServiceRequest): Promise<ClaudeServiceResponse> {
     const messages = this.history.get(sessionId);
 
     if (messages === undefined) {
@@ -42,9 +98,9 @@ export class ClaudeService {
       this.config.getOrThrow<string>('claude.api.url'),
       {
         body: JSON.stringify({
-          max_tokens: 1024,
+          max_tokens: this.config.getOrThrow<number>('claude.maxTokens'),
           messages: [...messages, question],
-          model: 'claude-sonnet-4-6',
+          model: DEFAULT_MODEL,
         }),
         dispatcher,
         headers,
@@ -55,23 +111,28 @@ export class ClaudeService {
     const { ok, status, statusText } = response;
 
     if (!ok) {
-      return `Error ${status} ${statusText}`;
+      throw new Error(`Error ${status} ${statusText}`);
     }
     if (status !== 200) {
-      return `Something went wrong ${status} ${statusText}`;
+      throw new Error(`Something went wrong ${status} ${statusText}`);
     }
 
     const {
-      content: [{ type, ...reply }],
-    } = (await response.json()) as {
-      content: { type: string; text: string }[];
-    };
+      content,
+      stop_reason: reason,
+      stop_sequence: sequence,
+      usage: { input_tokens: input, output_tokens: output },
+    } = (await response.json()) as ClaudeResponse;
+    let answer = '';
 
-    if (type !== 'text') {
-      return `Unsupported [${type}]\n\n${JSON.stringify(reply)}`;
+    for (const { type, ...others } of content) {
+      if (type === 'text') {
+        if (answer.length > 0) {
+          answer += '\n\n';
+        }
+        answer += others.text;
+      }
     }
-
-    const { text: answer } = reply;
 
     messages.push(question);
     messages.push({
@@ -79,15 +140,21 @@ export class ClaudeService {
       role: 'assistant',
     });
 
-    return answer;
+    return {
+      answer,
+      input,
+      output,
+      reason,
+      sequence,
+    };
   }
 
-  startSession(): string {
+  startSession(): UUID {
     const sessionId = randomUUID();
     this.history.set(sessionId, []);
     return sessionId;
   }
-  closeSession(sessionId: string) {
+  closeSession(sessionId: UUID) {
     this.history.delete(sessionId);
   }
 }
