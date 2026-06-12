@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import readline from 'readline';
 
-import { ClaudeService, ClaudeServiceResponse } from './claude.service';
+import { ClaudeService, ClaudeServiceResponse } from './claude/claude.service';
 
 const getAsk = (rl: readline.Interface) => (prompt: string) =>
   new Promise<string>((resolve) => rl.question(prompt, resolve));

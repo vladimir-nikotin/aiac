@@ -7,7 +7,7 @@ import { join } from 'path';
 // import { AppService } from './app.service';
 
 import claude from './claude.config';
-import { ClaudeService } from './claude.service';
+import { ClaudeService } from './claude/claude.service';
 import { CliService } from './cli.service';
 
 @Module({
