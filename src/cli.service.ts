@@ -3,10 +3,18 @@ import readline from 'readline';
 
 import { AgentService, AgentServiceResponse } from './agent';
 
-const getAsk = (rl: readline.Interface) => (prompt: string) =>
-  new Promise<string>((resolve) => rl.question(prompt, resolve));
+const COLORS = {
+  reset: '\x1b[0m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  cyan: '\x1b[36m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+};
 
-const models: Record<string, string> = {
+const MODELS: Record<string, string> = {
   haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-6',
@@ -17,24 +25,33 @@ const models: Record<string, string> = {
 
 @Injectable()
 export class CliService {
-  constructor(private readonly agent: AgentService) {}
+  private readonly ask: (prompt: string) => Promise<string>;
+  private readonly rl: readline.Interface;
 
-  async run() {
+  constructor(private readonly agent: AgentService) {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
     });
-    const ask = getAsk(rl);
+    this.ask = (prompt: string) =>
+      new Promise<string>((resolve) => rl.question(prompt, resolve));
+    this.rl = rl;
+  }
+
+  async run() {
+    let answer: AgentServiceResponse | undefined = undefined;
     let lines: string[] = [];
     let model: string | undefined;
     let stopSequences: string[] = [];
     let temperature: number | undefined;
 
     while (true) {
-      const userInput = await ask('> ').then((input: string) => input.trim());
+      const userInput = await this.ask('< ').then((input: string) =>
+        input.trim(),
+      );
 
       if (userInput.startsWith('/model')) {
-        const modelValue = models[userInput.slice(7).trim()];
+        const modelValue = MODELS[userInput.slice(7).trim()];
         if (modelValue) {
           model = modelValue;
         }
@@ -57,44 +74,73 @@ export class CliService {
         continue;
       }
 
-      rl.pause();
-
       const question = lines.join('\n');
 
-      const answer = await this.agent.ask({
-        model: model ?? models.haiku,
+      answer = await this.agent.ask({
+        model: model ?? MODELS.haiku,
         question,
         stopSequences,
         temperature,
       });
       this.printAnswer(answer);
 
-      rl.resume();
-
       lines = [];
       model = undefined;
       stopSequences = [];
       temperature = undefined;
     }
+
+    this.printG(`< input total  ${answer?.total.input ?? 0}\n`);
+    this.printY(`> output total ${answer?.total.output ?? 0}\n`);
+
+    this.rl.close();
+    // process.exit();
   }
 
-  printAnswer({
-    answer,
-    input,
-    output,
-    reason,
-    sequence,
-  }: AgentServiceResponse) {
-    process.stdout.write(`< in ${input} out ${output}`);
+  private printAnswer(agentResponse: AgentServiceResponse) {
+    this.printUsage(agentResponse);
+
+    const { answer } = agentResponse;
+    this.write(answer);
+    this.write('\n\n');
+
+    this.printUsage(agentResponse);
+  }
+
+  private printUsage({ reason, sequence, total, usage }: AgentServiceResponse) {
+    // input token line
+    this.printG('< input \t');
+    this.print(this.formatNumber(usage.input));
+    this.printG(`\t\ttotal ${this.formatNumber(total.input)}\n`);
+
+    // output token line
+    this.printY('> output\t');
+    this.print(this.formatNumber(usage.output));
+    this.printY(`\t\ttotal ${this.formatNumber(total.output)}`);
+    this.print();
+
+    // stop reason (in output line)
     if (reason === 'max_tokens') {
-      process.stdout.write(` ! TOKENS`);
+      this.printR(' TOKEN LIMIT');
+      this.print();
     }
     if (sequence !== null) {
-      process.stdout.write(` ! ${sequence}`);
+      this.printR(' STOP ');
+      this.print(sequence);
     }
-    process.stdout.write('\n');
 
-    process.stdout.write(answer);
-    process.stdout.write('\n\n');
+    this.write('\n');
   }
+
+  private write(s: string) {
+    this.rl.pause();
+    process.stdout.write(s);
+    this.rl.resume();
+  }
+
+  private formatNumber = (n: number) => String(n).padStart(7);
+  private print = (s: string = '') => this.write(`${COLORS.reset}${s}`);
+  private printG = (s: string = '') => this.write(`${COLORS.green}${s}`);
+  private printR = (s: string = '') => this.write(`${COLORS.red}${s}`);
+  private printY = (s: string = '') => this.write(`${COLORS.yellow}${s}`);
 }
