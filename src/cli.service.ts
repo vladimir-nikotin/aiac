@@ -24,6 +24,12 @@ const MODELS: Record<string, string> = {
   opus8: 'claude-opus-4-8',
 };
 
+type QuestionContext = {
+  model?: string;
+  stopSequences: string[];
+  temperature?: number;
+};
+
 @Injectable()
 export class CliService {
   private readonly ask: (prompt: string) => Promise<string>;
@@ -45,9 +51,9 @@ export class CliService {
   async run() {
     let answer: AgentServiceResponse | undefined = undefined;
     let lines: string[] = [];
-    let model: string | undefined;
-    let stopSequences: string[] = [];
-    let temperature: number | undefined;
+    const context: QuestionContext = {
+      stopSequences: [],
+    };
 
     while (true) {
       const userInput = await this.ask('< ').then((input: string) =>
@@ -59,24 +65,15 @@ export class CliService {
         continue;
       }
 
-      if (userInput.startsWith('/model')) {
-        const modelValue = MODELS[userInput.slice(7).trim()];
-        if (modelValue) {
-          model = modelValue;
-        }
-        continue;
-      }
-      if (userInput.startsWith('/stop')) {
-        stopSequences.push(userInput.slice(6).trim());
-        continue;
-      }
-      if (userInput.startsWith('/temp')) {
-        temperature = Number.parseFloat(userInput.slice(6));
-        continue;
-      }
-
       if (userInput.startsWith('/exit')) {
         break;
+      }
+
+      if (
+        userInput.startsWith('/') &&
+        this.processCommand(userInput, context)
+      ) {
+        continue;
       }
 
       if (userInput !== '') {
@@ -89,6 +86,7 @@ export class CliService {
 
       const question = lines.join('\n');
 
+      const { model, stopSequences, temperature } = context;
       answer = await this.agent.ask({
         model: model ?? MODELS.haiku,
         question,
@@ -98,9 +96,9 @@ export class CliService {
       this.printAnswer(answer);
 
       lines = [];
-      model = undefined;
-      stopSequences = [];
-      temperature = undefined;
+      context.model = undefined;
+      context.stopSequences = [];
+      context.temperature = undefined;
     }
 
     this.printG(`< input total  ${answer?.total.input ?? 0}\n`);
@@ -143,6 +141,42 @@ export class CliService {
     }
 
     this.write('\n');
+  }
+
+  private processCommand(userInput: string, context: QuestionContext): boolean {
+    if (userInput.startsWith('/?')) {
+      this.printC('Commands:\n');
+      this.write(' /exit\n');
+      this.write(` /model <${Object.keys(MODELS).join('|')}>\n`);
+      this.write(` /stop <sequence1[,sequence2[,..]]>\n`);
+      this.write(` /temp <0..1>\n`);
+      this.print('\n');
+      return true;
+    }
+
+    if (userInput.startsWith('/model')) {
+      const modelKey = userInput.slice(7).trim();
+      const modelValue = MODELS[modelKey];
+      if (modelValue) {
+        context.model = modelValue;
+        this.printC(`Model set to ${modelValue}`);
+      } else {
+        this.printR(
+          `Unknown model ${modelKey}, one of ${Object.keys(MODELS).join(', ')}`,
+        );
+      }
+      this.print('\n');
+      return true;
+    }
+    if (userInput.startsWith('/stop')) {
+      context.stopSequences.push(userInput.slice(6).trim());
+      return true;
+    }
+    if (userInput.startsWith('/temp')) {
+      context.temperature = Number.parseFloat(userInput.slice(6));
+      return true;
+    }
+    return false;
   }
 
   private async processDraft(userInput: string, lines: string[]) {
