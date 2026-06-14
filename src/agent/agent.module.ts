@@ -4,11 +4,10 @@ import { ClaudeModule } from '../claude';
 
 import { AgentService } from './agent.service';
 import { HistoryService } from './history.service';
-import { SummaryService } from './summary.service';
 
 @Module({
   imports: [ClaudeModule],
   exports: [AgentService],
-  providers: [AgentService, HistoryService, SummaryService],
+  providers: [AgentService, HistoryService],
 })
 export class AgentModule {}

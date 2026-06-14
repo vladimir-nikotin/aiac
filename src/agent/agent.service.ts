@@ -1,9 +1,14 @@
 import { Injectable } from '@nestjs/common';
 
-import { ClaudeService, ClaudeStopReason, Message } from '../claude';
-import { HistoryService } from './history.service';
+import {
+  ClaudeService,
+  ClaudeStopReason,
+  ClaudeTextContent,
+  Message,
+} from '../claude';
+import { DeepReadonly } from '../types';
+import { HistoryService, isSummaryRO } from './history.service';
 import { COMPRESSION_SYSTEM_CODE, COMPRESSION_USER_CODE } from './prompts';
-import { SummaryService } from './summary.service';
 
 export enum ContextStrategy {
   Full = 'full',
@@ -37,7 +42,6 @@ export class AgentService {
   constructor(
     private readonly claude: ClaudeService,
     private readonly history: HistoryService,
-    private readonly summary: SummaryService,
   ) {}
 
   async ask({
@@ -93,14 +97,14 @@ export class AgentService {
 
     let answer = '';
 
-    for (const { type, ...others } of content) {
+    for (const item of content) {
       if (answer.length > 0) {
         answer += '\n\n';
       }
-      if (type === 'text') {
-        answer += others.text;
+      if (item.type === 'text') {
+        answer += item.text;
       } else {
-        answer += `[${type}]`;
+        answer += `[${item.type}]`;
       }
     }
 
@@ -135,21 +139,32 @@ export class AgentService {
     // TODO контролируя проверку ошибок и max tokens, я бы мог сам выбирать модель
     model: string,
     question: string,
-  ) {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const history = this.history.get().map(({ usage, ...message }) => message);
-    let summarize = true;
-
-    if (contextStrategy !== ContextStrategy.Summarize) {
-      // Не суммаризируем, если стратегия не Summarize
-      summarize = false;
-    } else if (history.length < conversations * 2) {
-      // Не суммаризируем, если не достигнут лимит
-      summarize = false;
+  ): Promise<DeepReadonly<Message>[]> {
+    if (contextStrategy === ContextStrategy.Summarize) {
+      return this.getMessagesFromSummary(conversations, model, question);
     }
 
-    // в противном случае сводка уже есть в истории, осталось добавить новое сообщение
-    if (!summarize) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const history = this.history.get().map(({ usage, ...message }) => message);
+    history.push(this.createUserMessage([question]));
+    return history;
+  }
+
+  private async getMessagesFromSummary(
+    limit: number,
+    model: string,
+    question: string,
+  ): Promise<DeepReadonly<Message>[]> {
+    const history = this.history.getAll().reduce((agg, cur) => {
+      if (isSummaryRO(cur)) {
+        return [];
+      } else {
+        agg.push(cur);
+        return agg;
+      }
+    }, [] as DeepReadonly<Message>[]);
+
+    if (history.length < limit * 2) {
       history.push(this.createUserMessage([question]));
       return history;
     }
@@ -167,12 +182,13 @@ export class AgentService {
 
     // TODO stop_reason == 'max_tokens'
 
-    await this.history.flush(input, output);
-    await this.summary.save(content);
+    await this.history.summarize(input, output, content);
 
     return [
       this.createUserMessage([
-        ...content.map(({ text }) => text).filter((text) => !!text),
+        ...content
+          .filter((item): item is ClaudeTextContent => item.type === 'text')
+          .map(({ text }) => text),
         question,
       ]),
     ];

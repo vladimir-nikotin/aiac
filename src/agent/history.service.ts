@@ -4,17 +4,42 @@ import { ConfigService } from '@nestjs/config';
 import fs from 'fs';
 import path from 'path';
 
-import { Message } from '../claude';
+import { ClaudeContent, Message } from '../claude';
 import { DeepReadonly } from '../types';
 
 type StoredMessage = Message & {
   usage: number;
 };
+type SummaryPoint = {
+  content: ClaudeContent[];
+  input: number;
+  output: number;
+  type: 'summary';
+};
+// type CheckPoint
+type StoredMessageOrPoint = StoredMessage | SummaryPoint;
+
+function isMessage(item: StoredMessageOrPoint): item is StoredMessage {
+  return !('id' in item);
+}
+function isMessageRO(
+  item: DeepReadonly<StoredMessageOrPoint>,
+): item is DeepReadonly<StoredMessage> {
+  return !('id' in item);
+}
+export function isSummaryRO(
+  item: DeepReadonly<StoredMessageOrPoint>,
+): item is DeepReadonly<SummaryPoint> {
+  if (isMessageRO(item)) {
+    return false;
+  }
+  return item.type === 'summary';
+}
 
 @Injectable()
 export class HistoryService {
   private readonly filePath: string;
-  private messages: StoredMessage[] = [];
+  private messages: StoredMessageOrPoint[] = [];
   private totalInput: number = 0;
   private totalOutput: number = 0;
 
@@ -36,16 +61,29 @@ export class HistoryService {
     await this.save();
   }
 
-  async flush(inputTokens: number, outputTokens: number) {
-    this.totalInput += inputTokens;
-    this.totalOutput += outputTokens;
-    this.messages = [];
-
-    return this.save();
+  get(): DeepReadonly<StoredMessage[]> {
+    return this.messages.filter((item) => isMessage(item));
+  }
+  getAll(): DeepReadonly<StoredMessageOrPoint>[] {
+    return this.messages;
   }
 
-  get(): DeepReadonly<StoredMessage[]> {
-    return this.messages;
+  async summarize(
+    inputTokens: number,
+    outputTokens: number,
+    content: ClaudeContent[],
+  ) {
+    this.totalInput += inputTokens;
+    this.totalOutput += outputTokens;
+
+    this.messages.push({
+      content,
+      input: inputTokens,
+      output: outputTokens,
+      type: 'summary',
+    });
+
+    await this.save();
   }
 
   get total() {
@@ -58,9 +96,11 @@ export class HistoryService {
   private load(): void {
     try {
       const content = fs.readFileSync(this.filePath, 'utf-8');
-      this.messages = JSON.parse(content) as StoredMessage[];
+      this.messages = JSON.parse(content) as StoredMessageOrPoint[];
 
-      for (const { role, usage } of this.messages) {
+      for (const { role, usage } of this.messages.filter((item) =>
+        isMessage(item),
+      )) {
         if (role === 'assistant') this.totalOutput += usage;
         else this.totalInput += usage;
       }

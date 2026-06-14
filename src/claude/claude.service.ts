@@ -4,18 +4,17 @@ import { DeepReadonly } from '../types';
 import { ProxyAgent, fetch } from 'undici';
 
 // type ContentType = 'document' | 'image' | 'text' | 'tool_use' | 'tool_result';
-type ClaudeTextContent = {
+export type ClaudeTextContent = {
   type: 'text';
   text: string;
 };
 type ClaudeResponseToolContent = {
   type: 'tool_use';
-  text: never;
   id: string;
   name: string;
   input: Record<string, any>;
 };
-type ClaudeContent = ClaudeTextContent | ClaudeResponseToolContent;
+export type ClaudeContent = ClaudeTextContent | ClaudeResponseToolContent;
 
 type Role = 'assistant' | 'user';
 
