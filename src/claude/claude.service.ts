@@ -93,6 +93,8 @@ export class ClaudeService {
     const { ok, status, statusText } = response;
 
     if (!ok) {
+      // TODO wrap 429 Too Many Requests means api input overflow (> 4 MB)
+      // TODO wrap 400 Bad Request means any internal problem: overflow, max tokens-model mismatch etc
       throw new Error(`Error ${status} ${statusText}`);
     }
     if (status !== 200) {
