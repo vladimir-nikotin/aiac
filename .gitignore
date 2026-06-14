@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 dist
+drafts
 history.json
+history.*.json
 models.jsonc
 node_modules

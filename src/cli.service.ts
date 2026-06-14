@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import readline from 'readline';
 
 import { AgentService, AgentServiceResponse } from './agent';
+import { DraftService } from './draft.service';
 
 const COLORS = {
   reset: '\x1b[0m',
@@ -28,7 +29,10 @@ export class CliService {
   private readonly ask: (prompt: string) => Promise<string>;
   private readonly rl: readline.Interface;
 
-  constructor(private readonly agent: AgentService) {
+  constructor(
+    private readonly agent: AgentService,
+    private readonly drafts: DraftService,
+  ) {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
@@ -50,20 +54,29 @@ export class CliService {
         input.trim(),
       );
 
+      if (userInput.startsWith('./')) {
+        await this.processDraft(userInput, lines);
+        continue;
+      }
+
       if (userInput.startsWith('/model')) {
         const modelValue = MODELS[userInput.slice(7).trim()];
         if (modelValue) {
           model = modelValue;
         }
-      }
-      if (userInput.startsWith('/exit')) {
-        break;
+        continue;
       }
       if (userInput.startsWith('/stop')) {
         stopSequences.push(userInput.slice(6).trim());
+        continue;
       }
       if (userInput.startsWith('/temp')) {
         temperature = Number.parseFloat(userInput.slice(6));
+        continue;
+      }
+
+      if (userInput.startsWith('/exit')) {
+        break;
       }
 
       if (userInput !== '') {
@@ -132,6 +145,36 @@ export class CliService {
     this.write('\n');
   }
 
+  private async processDraft(userInput: string, lines: string[]) {
+    if (userInput === './') {
+      const drafts = await this.drafts.list();
+      if (drafts.length > 0) {
+        this.printC(
+          drafts
+            .map((draft) => ` - ${draft.slice(0, draft.lastIndexOf('.'))}`)
+            .join('\n'),
+        );
+      } else {
+        this.printR(`No drafts at ${this.drafts.path}`);
+      }
+      this.print('\n');
+    } else {
+      try {
+        const fileContent = await this.drafts.get(userInput.slice(2).trim());
+        this.printC('\n');
+
+        for (const line of fileContent.split('\n')) {
+          this.write(`${line}\n`);
+          lines.push(line);
+        }
+      } catch (error) {
+        this.printR(error instanceof Error ? error.message : String(error));
+      }
+
+      this.print('\n');
+    }
+  }
+
   private write(s: string) {
     this.rl.pause();
     process.stdout.write(s);
@@ -140,6 +183,7 @@ export class CliService {
 
   private formatNumber = (n: number) => String(n).padStart(7);
   private print = (s: string = '') => this.write(`${COLORS.reset}${s}`);
+  private printC = (s: string = '') => this.write(`${COLORS.cyan}${s}`);
   private printG = (s: string = '') => this.write(`${COLORS.green}${s}`);
   private printR = (s: string = '') => this.write(`${COLORS.red}${s}`);
   private printY = (s: string = '') => this.write(`${COLORS.yellow}${s}`);

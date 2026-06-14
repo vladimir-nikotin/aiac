@@ -9,6 +9,7 @@ import { join } from 'path';
 import { AgentModule, config as agentConfig } from './agent';
 import { config as claudeConfig } from './claude';
 import { CliService } from './cli.service';
+import { DraftService } from './draft.service';
 
 @Module({
   imports: [
@@ -22,6 +23,6 @@ import { CliService } from './cli.service';
   controllers: [
     // AppController
   ],
-  providers: [/* AppService, */ CliService],
+  providers: [/* AppService, */ CliService, DraftService],
 })
 export class AppModule {}
