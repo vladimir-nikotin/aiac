@@ -16,7 +16,7 @@ type ClaudeResponseToolContent = {
 };
 export type ClaudeContent = ClaudeTextContent | ClaudeResponseToolContent;
 
-type Role = 'assistant' | 'user';
+export type Role = 'assistant' | 'user';
 
 export type Message = {
   content: ClaudeContent[];
@@ -24,11 +24,28 @@ export type Message = {
 };
 
 type ClaudeServiceRequest = {
-  messages: Message[];
+  messages: Message[] | DeepReadonly<Message>[];
   model?: string;
   stopSequences: string[];
   system?: string;
   temperature?: number;
+};
+
+type ClaudeBody = {
+  // betas: unknown[]
+  model: string;
+  max_tokens: number;
+  messages: Message[] | DeepReadonly<Message>[];
+  // metadata: object;
+  stop_sequences?: string[];
+  stream?: boolean;
+  system?: string | string[];
+  temperature?: number;
+  // thinking: object;
+  // tool_choice
+  // tools
+  top_k?: number;
+  top_p?: number;
 };
 
 export type ClaudeStopReason =
@@ -53,7 +70,7 @@ type ClaudeResponse = {
 };
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
-const DEFAULT_TEMPERATURE = 1;
+// const DEFAULT_TEMPERATURE = 1;
 
 @Injectable()
 export class ClaudeService {
@@ -63,8 +80,9 @@ export class ClaudeService {
     messages,
     model,
     stopSequences,
+    system,
     temperature,
-  }: DeepReadonly<ClaudeServiceRequest>): Promise<ClaudeResponse> {
+  }: ClaudeServiceRequest): Promise<ClaudeResponse> {
     const headers = {
       'anthropic-version': this.config.getOrThrow<string>('claude.api.version'),
       'content-type': 'application/json',
@@ -74,16 +92,27 @@ export class ClaudeService {
       uri: this.config.getOrThrow<string>('claude.proxy.url'),
     });
 
+    const body: ClaudeBody = {
+      max_tokens: this.config.getOrThrow<number>('claude.maxTokens'),
+      messages: messages,
+      model: model ?? DEFAULT_MODEL,
+      // temperature: temperature ?? DEFAULT_TEMPERATURE,
+    };
+
+    if (stopSequences && stopSequences.length > 0) {
+      body.stop_sequences = stopSequences;
+    }
+    if (system) {
+      body.system = system;
+    }
+    if (temperature) {
+      body.temperature = temperature;
+    }
+
     const response = await fetch(
       this.config.getOrThrow<string>('claude.api.url'),
       {
-        body: JSON.stringify({
-          max_tokens: this.config.getOrThrow<number>('claude.maxTokens'),
-          messages,
-          model: model ?? DEFAULT_MODEL,
-          stop_sequences: stopSequences,
-          temperature: temperature ?? DEFAULT_TEMPERATURE,
-        }),
+        body: JSON.stringify(body),
         dispatcher,
         headers,
         method: 'POST',
@@ -95,7 +124,9 @@ export class ClaudeService {
     if (!ok) {
       // TODO wrap 429 Too Many Requests means api input overflow (> 4 MB)
       // TODO wrap 400 Bad Request means any internal problem: overflow, max tokens-model mismatch etc
-      throw new Error(`Error ${status} ${statusText}`);
+      throw new Error(
+        `Error ${status} ${statusText}\n\n${JSON.stringify(body)}`,
+      );
     }
     if (status !== 200) {
       throw new Error(`Something went wrong ${status} ${statusText}`);

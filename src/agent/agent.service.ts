@@ -5,17 +5,19 @@ import {
   ClaudeStopReason,
   ClaudeTextContent,
   Message,
+  Role,
 } from '../claude';
 import { DeepReadonly } from '../types';
-import { HistoryService, isSummaryRO } from './history.service';
+import { HistoryService, isSummaryRO, SummaryPoint } from './history.service';
 import { COMPRESSION_SYSTEM_CODE, COMPRESSION_USER_CODE } from './prompts';
 
 export enum ContextStrategy {
   Full = 'full',
+  SlidingWindow = 'slid',
   Summarize = 'summ',
 }
 export type AgentServiceRequestParams = {
-  contextStrategy?: ContextStrategy;
+  contextStrategy: ContextStrategy;
   conversations?: number;
   model?: string;
   stopSequences: string[];
@@ -117,7 +119,7 @@ export class AgentService {
     };
   }
 
-  private createUserMessage(prompts: string[]): Message {
+  private createMessage(prompts: string[], role: Role = 'user'): Message {
     const nonEmptyPrompts = prompts
       .map((value) => value.trim())
       .filter((value) => !!value);
@@ -129,7 +131,7 @@ export class AgentService {
         text,
         type: 'text',
       })),
-      role: 'user',
+      role,
     };
   }
 
@@ -140,32 +142,47 @@ export class AgentService {
     model: string,
     question: string,
   ): Promise<DeepReadonly<Message>[]> {
-    if (contextStrategy === ContextStrategy.Summarize) {
-      return this.getMessagesFromSummary(conversations, model, question);
+    switch (contextStrategy) {
+      case ContextStrategy.Summarize:
+        return this.getMessagesFromSummary(conversations, model, question);
+      case ContextStrategy.SlidingWindow:
+        return this.getMessagesInWindow(conversations, question);
+      case ContextStrategy.Full:
+        return this.getMessagesFull(question);
     }
-
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const history = this.history.get().map(({ usage, ...message }) => message);
-    history.push(this.createUserMessage([question]));
-    return history;
   }
-
   private async getMessagesFromSummary(
     limit: number,
     model: string,
     question: string,
   ): Promise<DeepReadonly<Message>[]> {
+    let lastSummary: DeepReadonly<SummaryPoint> | undefined;
     const history = this.history.getAll().reduce((agg, cur) => {
       if (isSummaryRO(cur)) {
+        lastSummary = cur;
         return [];
       } else {
-        agg.push(cur);
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { usage, ...message } = cur;
+        agg.push(message);
         return agg;
       }
     }, [] as DeepReadonly<Message>[]);
 
     if (history.length < limit * 2) {
-      history.push(this.createUserMessage([question]));
+      // добавялем начало разговора из саммари
+      if (lastSummary) {
+        history.unshift(
+          this.createMessage(['Контекст разговора из истории переписки']),
+          this.createMessage(
+            lastSummary.content
+              .filter((item): item is ClaudeTextContent => item.type === 'text')
+              .map(({ text }) => text),
+            'assistant',
+          ),
+        );
+      }
+      history.push(this.createMessage([question]));
       return history;
     }
 
@@ -174,7 +191,7 @@ export class AgentService {
       // stop_reason,
       usage: { input_tokens: input, output_tokens: output },
     } = await this.claude.fetchApi({
-      messages: [...history, this.createUserMessage([COMPRESSION_USER_CODE])],
+      messages: [...history, this.createMessage([COMPRESSION_USER_CODE])],
       model,
       stopSequences: [],
       system: COMPRESSION_SYSTEM_CODE,
@@ -185,12 +202,31 @@ export class AgentService {
     await this.history.summarize(input, output, content);
 
     return [
-      this.createUserMessage([
+      this.createMessage([
         ...content
           .filter((item): item is ClaudeTextContent => item.type === 'text')
           .map(({ text }) => text),
         question,
       ]),
+    ];
+  }
+  private getMessagesFull(question: string) {
+    return [
+      ...this.history
+        .getMessages()
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        .map(({ usage, ...message }) => message),
+      this.createMessage([question]),
+    ];
+  }
+  private getMessagesInWindow(limit: number, question: string) {
+    return [
+      ...this.history
+        .getMessages()
+        .slice(-2 * limit)
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        .map(({ usage, ...message }) => message),
+      this.createMessage([question]),
     ];
   }
 }

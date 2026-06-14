@@ -9,8 +9,9 @@ import { DeepReadonly } from '../types';
 
 type StoredMessage = Message & {
   usage: number;
+  // TODO type: 'message' упростит type guards
 };
-type SummaryPoint = {
+export type SummaryPoint = {
   content: ClaudeContent[];
   input: number;
   output: number;
@@ -61,11 +62,11 @@ export class HistoryService {
     await this.save();
   }
 
-  get(): DeepReadonly<StoredMessage[]> {
-    return this.messages.filter((item) => isMessage(item));
-  }
   getAll(): DeepReadonly<StoredMessageOrPoint>[] {
     return this.messages;
+  }
+  getMessages(): DeepReadonly<StoredMessage>[] {
+    return this.messages.filter((item) => isMessage(item));
   }
 
   async summarize(

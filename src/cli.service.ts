@@ -51,12 +51,13 @@ export class CliService {
     let answer: AgentServiceResponse | undefined = undefined;
     let lines: string[] = [];
     const context: AgentServiceRequestParams = {
+      contextStrategy: ContextStrategy.Full,
       stopSequences: [],
     };
 
     while (true) {
-      const userInput = await this.ask('< ').then((input: string) =>
-        input.trim(),
+      const userInput = await this.ask(`${COLORS.green}< ${COLORS.reset}`).then(
+        (input: string) => input.trim(),
       );
 
       if (userInput.startsWith('./')) {
@@ -158,14 +159,31 @@ export class CliService {
       this.write(` /cstr <${Object.values(ContextStrategy).join('|')}>\n`);
       this.write(' /exit\n');
       this.write(` /model <${Object.keys(MODELS).join('|')}>\n`);
-      this.write(` /stop <sequence1[,sequence2[,..]]>\n`);
-      this.write(` /temp <0..1>\n`);
+      this.write(` /stop sequence1[,sequence2[,..]]\n`);
+      this.write(` /temp 0..1\n`);
       this.print('\n');
       return true;
     }
 
     if (userInput.startsWith(`/cstr`)) {
       const [enumKey, param] = userInput.slice(6).trim().split(' ', 2);
+
+      if (!enumKey) {
+        const cs = context.contextStrategy;
+        this.printC(`ContextStrategy is ${cs}`);
+
+        if (cs !== ContextStrategy.Full) {
+          this.write(` ${context.conversations}`);
+        }
+
+        this.write('\n  /cstr full - полная история\n');
+        this.write('  /cstr slid <int> - размер окна\n');
+        this.write('  /cstr summ <int> - суммаризация после N реплик');
+
+        this.print('\n');
+        return true;
+      }
+
       if (
         !Object.values(ContextStrategy).includes(enumKey as ContextStrategy)
       ) {
@@ -177,17 +195,21 @@ export class CliService {
       context.contextStrategy = enumKey as ContextStrategy;
       delete context.conversations;
 
-      if (context.contextStrategy === ContextStrategy.Summarize) {
+      if (context.contextStrategy !== ContextStrategy.Full) {
         const conversations = Number.parseInt(param);
         if (!Number.isNaN(conversations) && conversations > 0) {
           context.conversations = conversations;
-          this.print(`Summarize after ${conversations} message\n`);
+        } else {
+          context.conversations = 20;
         }
+        this.printC(
+          `${context.contextStrategy} after ${conversations} message`,
+        );
+        this.print('\n');
       }
 
       return true;
     }
-
     if (userInput.startsWith('/model')) {
       const modelKey = userInput.slice(7).trim();
       const modelValue = MODELS[modelKey];
