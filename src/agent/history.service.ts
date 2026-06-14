@@ -36,6 +36,14 @@ export class HistoryService {
     await this.save();
   }
 
+  async flush(inputTokens: number, outputTokens: number) {
+    this.totalInput += inputTokens;
+    this.totalOutput += outputTokens;
+    this.messages = [];
+
+    return this.save();
+  }
+
   get(): DeepReadonly<StoredMessage[]> {
     return this.messages;
   }

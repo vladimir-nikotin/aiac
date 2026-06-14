@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import readline from 'readline';
 
-import { AgentService, AgentServiceResponse } from './agent';
+import {
+  AgentService,
+  AgentServiceRequestParams,
+  AgentServiceResponse,
+  ContextStrategy,
+} from './agent';
 import { DraftService } from './draft.service';
 
 const COLORS = {
@@ -22,12 +27,6 @@ const MODELS: Record<string, string> = {
   opus6: 'claude-opus-4-6',
   opus7: 'claude-opus-4-7',
   opus8: 'claude-opus-4-8',
-};
-
-type QuestionContext = {
-  model?: string;
-  stopSequences: string[];
-  temperature?: number;
 };
 
 @Injectable()
@@ -51,7 +50,7 @@ export class CliService {
   async run() {
     let answer: AgentServiceResponse | undefined = undefined;
     let lines: string[] = [];
-    const context: QuestionContext = {
+    const context: AgentServiceRequestParams = {
       stopSequences: [],
     };
 
@@ -86,8 +85,16 @@ export class CliService {
 
       const question = lines.join('\n');
 
-      const { model, stopSequences, temperature } = context;
+      const {
+        contextStrategy,
+        conversations,
+        model,
+        stopSequences,
+        temperature,
+      } = context;
       answer = await this.agent.ask({
+        contextStrategy,
+        conversations,
         model: model ?? MODELS.haiku,
         question,
         stopSequences,
@@ -105,7 +112,6 @@ export class CliService {
     this.printY(`> output total ${answer?.total.output ?? 0}\n`);
 
     this.rl.close();
-    // process.exit();
   }
 
   private printAnswer(agentResponse: AgentServiceResponse) {
@@ -143,14 +149,42 @@ export class CliService {
     this.write('\n');
   }
 
-  private processCommand(userInput: string, context: QuestionContext): boolean {
+  private processCommand(
+    userInput: string,
+    context: AgentServiceRequestParams,
+  ): boolean {
     if (userInput.startsWith('/?')) {
       this.printC('Commands:\n');
+      this.write(` /cstr <${Object.values(ContextStrategy).join('|')}>\n`);
       this.write(' /exit\n');
       this.write(` /model <${Object.keys(MODELS).join('|')}>\n`);
       this.write(` /stop <sequence1[,sequence2[,..]]>\n`);
       this.write(` /temp <0..1>\n`);
       this.print('\n');
+      return true;
+    }
+
+    if (userInput.startsWith(`/cstr`)) {
+      const [enumKey, param] = userInput.slice(6).trim().split(' ', 2);
+      if (
+        !Object.values(ContextStrategy).includes(enumKey as ContextStrategy)
+      ) {
+        this.printR(`Unknown context strategy ${enumKey}`);
+        this.print('\n');
+        return true;
+      }
+
+      context.contextStrategy = enumKey as ContextStrategy;
+      delete context.conversations;
+
+      if (context.contextStrategy === ContextStrategy.Summarize) {
+        const conversations = Number.parseInt(param);
+        if (!Number.isNaN(conversations) && conversations > 0) {
+          context.conversations = conversations;
+          this.print(`Summarize after ${conversations} message\n`);
+        }
+      }
+
       return true;
     }
 

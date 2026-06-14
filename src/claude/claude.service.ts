@@ -28,6 +28,7 @@ type ClaudeServiceRequest = {
   messages: Message[];
   model?: string;
   stopSequences: string[];
+  system?: string;
   temperature?: number;
 };
 
