@@ -3,6 +3,7 @@
 !.env.example
 dist
 drafts
+facts.md
 history.json
 history.*.json
 models.jsonc

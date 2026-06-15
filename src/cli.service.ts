@@ -177,8 +177,9 @@ export class CliService {
         }
 
         this.write('\n  /cstr full - полная история\n');
-        this.write('  /cstr slid <int> - размер окна\n');
-        this.write('  /cstr summ <int> - суммаризация после N реплик');
+        this.write(' - /cstr fact <int> - размер окна\n');
+        this.write(' - /cstr slid <int> - размер окна\n');
+        this.write(' - /cstr summ <int> - суммаризация после N реплик');
 
         this.print('\n');
         return true;
@@ -203,7 +204,7 @@ export class CliService {
           context.conversations = 20;
         }
         this.printC(
-          `${context.contextStrategy} after ${conversations} message`,
+          `${context.contextStrategy} after ${context.conversations} message`,
         );
         this.print('\n');
       }

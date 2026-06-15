@@ -26,7 +26,7 @@ export type Message = {
 type ClaudeServiceRequest = {
   messages: Message[] | DeepReadonly<Message>[];
   model?: string;
-  stopSequences: string[];
+  stopSequences?: string[];
   system?: string;
   temperature?: number;
 };
@@ -99,6 +99,7 @@ export class ClaudeService {
       // temperature: temperature ?? DEFAULT_TEMPERATURE,
     };
 
+    // TODO глупость, надо вернуть как было
     if (stopSequences && stopSequences.length > 0) {
       body.stop_sequences = stopSequences;
     }

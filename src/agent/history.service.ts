@@ -21,12 +21,12 @@ export type SummaryPoint = {
 type StoredMessageOrPoint = StoredMessage | SummaryPoint;
 
 function isMessage(item: StoredMessageOrPoint): item is StoredMessage {
-  return !('id' in item);
+  return !('type' in item);
 }
 function isMessageRO(
   item: DeepReadonly<StoredMessageOrPoint>,
 ): item is DeepReadonly<StoredMessage> {
-  return !('id' in item);
+  return !('type' in item);
 }
 export function isSummaryRO(
   item: DeepReadonly<StoredMessageOrPoint>,
@@ -35,6 +35,13 @@ export function isSummaryRO(
     return false;
   }
   return item.type === 'summary';
+}
+export function sMessageToMessage(
+  sMessage: DeepReadonly<StoredMessage>,
+): DeepReadonly<Message> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { usage, ...message } = sMessage;
+  return message;
 }
 
 @Injectable()
@@ -92,6 +99,12 @@ export class HistoryService {
       input: this.totalInput,
       output: this.totalOutput,
     };
+  }
+
+  updateUsage(input: number, output: number) {
+    this.totalInput += input;
+    this.totalOutput += output;
+    // TODO нарушает totals, надо логировать в общую историю тоже
   }
 
   private load(): void {

@@ -8,10 +8,17 @@ import {
   Role,
 } from '../claude';
 import { DeepReadonly } from '../types';
-import { HistoryService, isSummaryRO, SummaryPoint } from './history.service';
+import {
+  HistoryService,
+  isSummaryRO,
+  sMessageToMessage,
+  SummaryPoint,
+} from './history.service';
 import { COMPRESSION_SYSTEM_CODE, COMPRESSION_USER_CODE } from './prompts';
+import { FactsService } from './fatcs.service';
 
 export enum ContextStrategy {
+  Facts = 'fact',
   Full = 'full',
   SlidingWindow = 'slid',
   Summarize = 'summ',
@@ -43,6 +50,7 @@ export type AgentServiceResponse = {
 export class AgentService {
   constructor(
     private readonly claude: ClaudeService,
+    private readonly facts: FactsService,
     private readonly history: HistoryService,
   ) {}
 
@@ -84,6 +92,21 @@ export class AgentService {
     });
 
     // TODO do not add if reason === 'max_tokens'
+
+    if (contextStrategy === ContextStrategy.Facts) {
+      const exist = await this.facts.exist();
+      if (exist) {
+        await this.facts.update(model, message, {
+          content,
+          role: 'assistant',
+        });
+      } else {
+        await this.facts.create(model, messages, {
+          content,
+          role: 'assistant',
+        });
+      }
+    }
 
     await this.history.add(
       {
@@ -147,10 +170,23 @@ export class AgentService {
         return this.getMessagesFromSummary(conversations, model, question);
       case ContextStrategy.SlidingWindow:
         return this.getMessagesInWindow(conversations, question);
+      case ContextStrategy.Facts:
+        return this.getMessagesForFacts(conversations, question);
       case ContextStrategy.Full:
         return this.getMessagesFull(question);
     }
   }
+
+  private async getMessagesForFacts(limit: number, question: string) {
+    const exists = await this.facts.exist();
+    if (exists) {
+      return this.getMessagesInWindow(limit, question);
+    } else {
+      return this.getMessagesFull(question);
+    }
+  }
+
+  // TODO слишком много ответственности. этому место в summary service?
   private async getMessagesFromSummary(
     limit: number,
     model: string,
@@ -162,15 +198,15 @@ export class AgentService {
         lastSummary = cur;
         return [];
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { usage, ...message } = cur;
-        agg.push(message);
+        agg.push(sMessageToMessage(cur));
         return agg;
       }
     }, [] as DeepReadonly<Message>[]);
 
     if (history.length < limit * 2) {
       // добавялем начало разговора из саммари
+      // TODO можон лучше, хранить сразу парой. type: summary транслируется в role: user.
+      // а дальше history начиная с assistant
       if (lastSummary) {
         history.unshift(
           this.createMessage(['Контекст разговора из истории переписки']),
@@ -193,7 +229,6 @@ export class AgentService {
     } = await this.claude.fetchApi({
       messages: [...history, this.createMessage([COMPRESSION_USER_CODE])],
       model,
-      stopSequences: [],
       system: COMPRESSION_SYSTEM_CODE,
     });
 
@@ -212,10 +247,7 @@ export class AgentService {
   }
   private getMessagesFull(question: string) {
     return [
-      ...this.history
-        .getMessages()
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        .map(({ usage, ...message }) => message),
+      ...this.history.getMessages().map(sMessageToMessage),
       this.createMessage([question]),
     ];
   }
@@ -224,8 +256,7 @@ export class AgentService {
       ...this.history
         .getMessages()
         .slice(-2 * limit)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        .map(({ usage, ...message }) => message),
+        .map(sMessageToMessage),
       this.createMessage([question]),
     ];
   }
